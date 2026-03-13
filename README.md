@@ -1,21 +1,39 @@
 # Origin Navigation Assignment
 
-This workspace contains a ROS 2 Python solution for 2D path smoothing and
-trajectory tracking with a differential-drive robot in simulation. The pipeline
-is:
+This workspace contains a ROS 2 Python package for 2D path smoothing and
+trajectory tracking of a differential-drive robot in simulation.
+
+Pipeline:
 
 `waypoints -> smooth_path -> timed trajectory -> controller -> /cmd_vel`
+
+## Quick start
+
+If your ROS 2 environment and TurtleBot3 simulator are already installed, the
+minimum commands are:
+
+```bash
+cd /home/bim/origin_ws
+source /opt/ros/$ROS_DISTRO/setup.bash
+export TURTLEBOT3_MODEL=burger
+colcon build --packages-select origin_navigation
+source install/setup.bash
+ros2 launch origin_navigation simulation.launch.py
+```
+
+This launches Gazebo, RViz, the path smoother, the trajectory generator, and
+the trajectory tracking controller.
 
 ## What is implemented
 
 - Path smoothing with a spline-based resampler that converts sparse waypoints
   into an approximately arc-length-uniform path.
 - Time-parameterized trajectory generation with:
-  - constant-speed timing for closed loops
-  - trapezoidal timing for open paths
+  - trapezoidal timing for paths
 - A trajectory tracking controller for a differential-drive robot using:
   - nearest-reference progress tracking
-  - pure-pursuit-style lookahead steering
+  - Trapezoidal reference velocity
+  - Stanley controller for angular velocity
   - heading and cross-track feedback
 - RViz visualization for:
   - original waypoints
@@ -38,43 +56,88 @@ is:
 
 ## Setup
 
-Prerequisites:
+### 1. Prerequisites
 
-- ROS 2 installed and sourced
+Before building this package, make sure you have:
+
+- ROS 2 (in my case ros-jazzy) installed and working
+- `colcon` available in your shell
 - TurtleBot3 simulation packages installed
-- Python dependencies available for ROS 2:
+- Python ROS dependencies available:
   - `numpy`
   - `scipy`
   - `matplotlib`
 
-Environment example:
+The package dependencies declared in
+`src/origin_navigation/package.xml` include:
+
+- `rclpy`
+- `geometry_msgs`
+- `nav_msgs`
+- `tf_transformations`
+- `turtlebot3_gazebo`
+
+### 2. Source ROS 2 and set the robot model
+
+Open a terminal and run:
 
 ```bash
 source /opt/ros/$ROS_DISTRO/setup.bash
 export TURTLEBOT3_MODEL=burger
 ```
 
-Build:
+If you use a different TurtleBot3 model, replace `burger` with that model name.
+
+### 3. Build the workspace
+
+From the workspace root:
 
 ```bash
 cd /home/bim/origin_ws
 colcon build --packages-select origin_navigation
-source install/setup.bash
 ```
 
-## Run
+### 4. Source the workspace overlay
 
-Launch the full simulation:
+After the build finishes:
+
+```bash
+source /home/bim/origin_ws/install/setup.bash
+```
+
+You must source this overlay in every new terminal before running the package.
+
+## Run the simulation
+
+Launch the full navigation demo with:
 
 ```bash
 ros2 launch origin_navigation simulation.launch.py
 ```
 
-Useful launch arguments:
+This starts:
+
+- the TurtleBot3 simulation
+- the smoothing and trajectory generation nodes
+- the trajectory tracking controller
+- RViz visualization
+- metrics logging
+
+### Optional launch arguments
+
+Example with a custom cruise speed and a closed-loop path:
 
 ```bash
 ros2 launch origin_navigation simulation.launch.py cruise_speed:=0.25 closed_path:=true
 ```
+
+### What you should see
+
+When the launch succeeds, you should see:
+
+- Gazebo running with the robot in simulation
+- RViz showing the waypoint path, smoothed path, and robot motion
+- the robot publishing `/cmd_vel` and following the generated trajectory
 
 ## Design choices
 
@@ -91,26 +154,29 @@ ros2 launch origin_navigation simulation.launch.py cruise_speed:=0.25 closed_pat
 
 ## Testing
 
-Run the package tests:
+Run the package tests from the workspace root:
 
 ```bash
 cd /home/bim/origin_ws
+source /opt/ros/$ROS_DISTRO/setup.bash
+source install/setup.bash
 colcon test --packages-select origin_navigation
 colcon test-result --verbose
 ```
 
 The included unit tests cover smoothing density and timing monotonicity in
-`test/test_trajectory_math.py`.
+`src/origin_navigation/test/test_trajectory_math.py`.
 
 ## Results and plots
 
-After a simulation run, metrics are saved to:
+After a simulation run, tracking metrics are saved to:
 
 - `results/navigation_metrics.csv`
 
-Plots can be generated with:
+To generate plots from the saved metrics:
 
 ```bash
+cd /home/bim/origin_ws
 python3 src/origin_navigation/scripts/plot_navigation_metrics.py
 ```
 
@@ -144,5 +210,3 @@ AI assistance was used to accelerate:
 - documentation drafting
 - unit test scaffolding
 
-All generated code and explanations should still be reviewed and validated in
-simulation before use on hardware.
