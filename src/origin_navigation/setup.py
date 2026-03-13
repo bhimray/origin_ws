@@ -17,6 +17,9 @@ setup(
 
         ('share/' + package_name + '/rviz',
             ['rviz/navigation.rviz']),
+
+        ('share/' + package_name + '/scripts',
+            ['scripts/plot_navigation_metrics.py']),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -36,6 +39,7 @@ setup(
             'trajectory_generator = origin_navigation.trajectory_generator:main',
             'trajectory_controller = origin_navigation.trajectory_controller:main',
             'odom_path_publisher = origin_navigation.odom_path_publisher:main',
+            'navigation_metrics_logger = origin_navigation.navigation_metrics_logger:main',
         ],
     },
 )

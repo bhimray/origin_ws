@@ -9,7 +9,6 @@ from ament_index_python.packages import get_package_share_directory
 
 import os
 
-
 def generate_launch_description():
 
     turtlebot3_gazebo_dir = get_package_share_directory('turtlebot3_gazebo')
@@ -83,6 +82,16 @@ def generate_launch_description():
         output='screen'
     )
 
+    metrics_logger_node = Node(
+        package='origin_navigation',
+        executable='navigation_metrics_logger',
+        name='navigation_metrics_logger',
+        output='screen',
+        parameters=[{
+            'output_path': '/home/bim/origin_ws/results/navigation_metrics.csv'
+        }]
+    )
+
     # RViz visualization
     rviz_config = os.path.join(
         get_package_share_directory('origin_navigation'),
@@ -109,6 +118,7 @@ def generate_launch_description():
         trajectory_node,
         controller_node,
         odom_path_node,
+        metrics_logger_node,
 
         rviz
     ])
