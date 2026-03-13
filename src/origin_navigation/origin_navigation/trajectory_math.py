@@ -176,6 +176,39 @@ def trapezoidal_time_profile(path_length, cruise_speed, acceleration):
     return accel_time, cruise_time, cruise_distance, total_time
 
 
+def trapezoidal_speed_at_distance(
+    distance,
+    path_length,
+    cruise_speed,
+    acceleration,
+):
+
+    accel_time, _, cruise_distance, _ = trapezoidal_time_profile(
+        path_length,
+        cruise_speed,
+        acceleration,
+    )
+
+    if path_length <= 0.0:
+        return 0.0
+
+    accel_distance = 0.5 * acceleration * accel_time * accel_time
+    decel_start = accel_distance + cruise_distance
+    peak_speed = acceleration * accel_time
+
+    if distance <= accel_distance:
+        return min(peak_speed, math.sqrt(2.0 * acceleration * distance))
+
+    if distance <= decel_start:
+        return peak_speed
+
+    remaining_distance = max(path_length - distance, 0.0)
+    return min(
+        peak_speed,
+        math.sqrt(2.0 * acceleration * remaining_distance),
+    )
+
+
 def time_at_distance(distance, path_length, cruise_speed, acceleration):
 
     accel_time, _, cruise_distance, total_time = (
@@ -205,6 +238,7 @@ def generate_timed_trajectory(
     points,
     cruise_speed=0.3,
     acceleration=0.4,
+    velocity_profile='trapezoidal',
     closed_path=True,
 ):
 
@@ -222,13 +256,24 @@ def generate_timed_trajectory(
     ):
         if closed_path:
             time_from_start = distance / max(cruise_speed, 1e-6)
+            desired_speed = cruise_speed
         else:
-            time_from_start = time_at_distance(
-                distance,
-                path_length,
-                cruise_speed,
-                acceleration,
-            )
+            if velocity_profile == 'constant':
+                time_from_start = distance / max(cruise_speed, 1e-6)
+                desired_speed = cruise_speed
+            else:
+                time_from_start = time_at_distance(
+                    distance,
+                    path_length,
+                    cruise_speed,
+                    acceleration,
+                )
+                desired_speed = trapezoidal_speed_at_distance(
+                    distance,
+                    path_length,
+                    cruise_speed,
+                    acceleration,
+                )
 
         trajectory.append({
             'index': index,
@@ -236,6 +281,7 @@ def generate_timed_trajectory(
             'y': point[1],
             'heading': heading,
             'time_from_start': time_from_start,
+            'desired_speed': desired_speed,
         })
 
     return trajectory

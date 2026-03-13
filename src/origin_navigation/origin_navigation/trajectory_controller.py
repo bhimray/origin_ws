@@ -5,11 +5,7 @@ from geometry_msgs.msg import TwistStamped
 from nav_msgs.msg import Odometry, Path
 from rclpy.node import Node
 
-from .trajectory_math import (
-    normalize_angle,
-    quaternion_to_yaw,
-    target_speed_from_trajectory,
-)
+from .trajectory_math import normalize_angle, quaternion_to_yaw
 
 
 class TrajectoryController(Node):
@@ -20,14 +16,13 @@ class TrajectoryController(Node):
 
         self.declare_parameter('closed_path', True)
         self.declare_parameter('goal_tolerance', 0.12)
-        self.declare_parameter('lookahead_distance', 0.35)
-        self.declare_parameter('lookahead_gain', 0.8)
-        self.declare_parameter('heading_gain', 1.8)
-        self.declare_parameter('cross_track_gain', 1.0)
-        self.declare_parameter('max_linear_velocity', 0.35)
-        self.declare_parameter('max_angular_velocity', 1.8)
-        self.declare_parameter('control_rate_hz', 20.0)
-        self.declare_parameter('search_window', 60)
+        self.declare_parameter('front_axle_offset', 0.20)
+        self.declare_parameter('heading_gain', 1.6)
+        self.declare_parameter('stanley_gain', 2.8)
+        self.declare_parameter('softening_velocity', 0.05)
+        self.declare_parameter('speed_gain', 1.0)
+        self.declare_parameter('max_linear_velocity', 0.16)
+        self.declare_parameter('max_angular_velocity', 2.2)
 
         self.subscription_path = self.create_subscription(
             Path,
@@ -49,31 +44,26 @@ class TrajectoryController(Node):
             10
         )
 
-        control_rate = self.get_parameter(
-            'control_rate_hz'
-        ).get_parameter_value().double_value
-        self.timer = self.create_timer(1.0 / control_rate, self.control_loop)
-
         self.trajectory = []
-        self.closed_path = True
         self.current_index = 0
+        self.closed_path = True
         self.state = None
 
     def path_callback(self, msg):
 
-        trajectory = []
-
-        for pose_stamped in msg.poses:
-            stamp = pose_stamped.header.stamp
-            time_sec = float(stamp.sec) + float(stamp.nanosec) * 1e-9
-            trajectory.append({
+        self.trajectory = [
+            {
                 'x': pose_stamped.pose.position.x,
                 'y': pose_stamped.pose.position.y,
                 'heading': quaternion_to_yaw(pose_stamped.pose.orientation),
-                'time_from_start': time_sec,
-            })
+                'time_from_start': (
+                    float(pose_stamped.header.stamp.sec) +
+                    float(pose_stamped.header.stamp.nanosec) * 1e-9
+                ),
+            }
+            for pose_stamped in msg.poses
+        ]
 
-        self.trajectory = trajectory
         self.closed_path = self.get_parameter(
             'closed_path'
         ).get_parameter_value().bool_value
@@ -81,9 +71,11 @@ class TrajectoryController(Node):
 
     def odom_callback(self, msg):
 
+        if len(self.trajectory) < 2:
+            return
+
         pose = msg.pose.pose
         twist = msg.twist.twist
-
         self.state = {
             'x': pose.position.x,
             'y': pose.position.y,
@@ -91,74 +83,54 @@ class TrajectoryController(Node):
             'linear_velocity': twist.linear.x,
         }
 
-    def control_loop(self):
-
-        if self.state is None or len(self.trajectory) < 2:
-            return
-
         if (
             not self.closed_path and
-            self.goal_reached(self.state, self.trajectory[-1])
+            self.goal_reached(self.trajectory[-1]['x'], self.trajectory[-1]['y'])
         ):
             self.publish_command(0.0, 0.0)
             return
 
-        reference_index = self.find_reference_index()
-        self.current_index = reference_index
+        front_x, front_y = self.front_axle_position()
+        segment_index = self.find_nearest_segment_index(front_x, front_y)
+        self.current_index = segment_index
 
-        desired_speed = target_speed_from_trajectory(
-            self.trajectory,
-            reference_index,
-            self.closed_path,
+        start = self.trajectory[segment_index]
+        end = self.next_point(segment_index)
+
+        seg_dx = end['x'] - start['x']
+        seg_dy = end['y'] - start['y']
+        seg_len = math.hypot(seg_dx, seg_dy)
+
+        if seg_len < 1e-6:
+            self.publish_command(0.0, 0.0)
+            return
+
+        path_heading = math.atan2(seg_dy, seg_dx)
+        heading_error = normalize_angle(path_heading - self.state['yaw'])
+
+        rel_x = front_x - start['x']
+        rel_y = front_y - start['y']
+        cross_track_error = (
+            rel_x * seg_dy - rel_y * seg_dx
+        ) / seg_len
+
+        desired_speed = self.reference_speed(segment_index)
+        commanded_speed = self.command_speed(desired_speed, heading_error)
+
+        stanley_term = math.atan2(
+            self.get_parameter(
+                'stanley_gain'
+            ).get_parameter_value().double_value * cross_track_error,
+            commanded_speed + self.get_parameter(
+                'softening_velocity'
+            ).get_parameter_value().double_value,
         )
-        max_linear_velocity = self.get_parameter(
-            'max_linear_velocity'
-        ).get_parameter_value().double_value
-        desired_speed = min(desired_speed, max_linear_velocity)
-
-        lookahead_distance = self.compute_lookahead_distance(desired_speed)
-        target_index = self.find_lookahead_index(
-            reference_index,
-            lookahead_distance,
-        )
-        target_point = self.trajectory[target_index]
-        reference_point = self.trajectory[reference_index]
-
-        dx = target_point['x'] - self.state['x']
-        dy = target_point['y'] - self.state['y']
-        distance_to_target = math.hypot(dx, dy)
-        heading_to_target = math.atan2(dy, dx)
-        alpha = normalize_angle(heading_to_target - self.state['yaw'])
-        heading_error = normalize_angle(
-            target_point['heading'] - self.state['yaw']
-        )
-        cross_track_error = self.compute_cross_track_error(reference_point)
-
-        if distance_to_target < 1e-3:
-            curvature = 0.0
-        else:
-            curvature = (
-                2.0 *
-                math.sin(alpha) /
-                max(distance_to_target, lookahead_distance)
-            )
-
-        linear_velocity = desired_speed * max(0.2, math.cos(alpha))
-        if not self.closed_path:
-            linear_velocity *= min(
-                1.0,
-                distance_to_target / max(lookahead_distance, 1e-6),
-            )
 
         angular_velocity = (
-            linear_velocity * curvature +
             self.get_parameter(
                 'heading_gain'
             ).get_parameter_value().double_value * heading_error +
-            self.get_parameter(
-                'cross_track_gain'
-            ).get_parameter_value().double_value *
-            cross_track_error
+            stanley_term
         )
 
         max_angular_velocity = self.get_parameter(
@@ -169,96 +141,116 @@ class TrajectoryController(Node):
             min(max_angular_velocity, angular_velocity),
         )
 
-        self.publish_command(linear_velocity, angular_velocity)
+        self.publish_command(commanded_speed, angular_velocity)
 
-    def compute_lookahead_distance(self, desired_speed):
+    def front_axle_position(self):
 
-        base_distance = self.get_parameter(
-            'lookahead_distance'
+        front_axle_offset = self.get_parameter(
+            'front_axle_offset'
         ).get_parameter_value().double_value
-        lookahead_gain = self.get_parameter(
-            'lookahead_gain'
-        ).get_parameter_value().double_value
-        return max(base_distance, base_distance + lookahead_gain * desired_speed)
-
-    def goal_reached(self, state, goal):
-
-        distance = math.hypot(goal['x'] - state['x'], goal['y'] - state['y'])
-        tolerance = self.get_parameter(
-            'goal_tolerance'
-        ).get_parameter_value().double_value
-        return distance <= tolerance
-
-    def compute_cross_track_error(self, reference_point):
-
-        dx = self.state['x'] - reference_point['x']
-        dy = self.state['y'] - reference_point['y']
         return (
-            -math.sin(reference_point['heading']) * dx +
-            math.cos(reference_point['heading']) * dy
+            self.state['x'] + front_axle_offset * math.cos(self.state['yaw']),
+            self.state['y'] + front_axle_offset * math.sin(self.state['yaw']),
         )
 
-    def find_reference_index(self):
+    def next_point(self, index):
 
-        search_window = self.get_parameter(
-            'search_window'
-        ).get_parameter_value().integer_value
+        next_index = index + 1
+        if next_index >= len(self.trajectory):
+            if self.closed_path:
+                return self.trajectory[0]
+            return self.trajectory[-1]
+        return self.trajectory[next_index]
 
-        if self.closed_path:
-            candidate_indices = [
-                (self.current_index + offset) % len(self.trajectory)
-                for offset in range(search_window)
-            ]
-        else:
-            end_index = min(
-                len(self.trajectory),
-                max(self.current_index + search_window, search_window),
+    def reference_speed(self, index):
+
+        current = self.trajectory[index]
+        nxt = self.next_point(index)
+        distance = math.hypot(
+            nxt['x'] - current['x'],
+            nxt['y'] - current['y'],
+        )
+        delta_time = nxt['time_from_start'] - current['time_from_start']
+
+        if self.closed_path and index == len(self.trajectory) - 1:
+            previous = self.trajectory[max(0, len(self.trajectory) - 2)]
+            delta_time = max(
+                current['time_from_start'] - previous['time_from_start'],
+                1e-6,
             )
-            candidate_indices = list(range(self.current_index, end_index))
-            if not candidate_indices:
-                candidate_indices = list(range(len(self.trajectory)))
 
-        nearest_index = candidate_indices[0]
-        nearest_distance = float('inf')
+        if delta_time <= 1e-6:
+            return 0.0
 
-        for index in candidate_indices:
-            point = self.trajectory[index]
-            distance = math.hypot(
-                point['x'] - self.state['x'],
-                point['y'] - self.state['y'],
-            )
-            if distance < nearest_distance:
-                nearest_distance = distance
+        return distance / delta_time
+
+    def command_speed(self, desired_speed, heading_error):
+
+        max_linear_velocity = self.get_parameter(
+            'max_linear_velocity'
+        ).get_parameter_value().double_value
+        desired_speed = min(desired_speed, max_linear_velocity)
+
+        heading_scale = max(0.15, 1.0 - abs(heading_error) / 1.6)
+        desired_speed *= heading_scale
+
+        current_speed = max(self.state['linear_velocity'], 0.0)
+        speed_gain = self.get_parameter(
+            'speed_gain'
+        ).get_parameter_value().double_value
+        commanded_speed = current_speed + speed_gain * (
+            desired_speed - current_speed
+        )
+
+        return max(0.0, min(max_linear_velocity, commanded_speed))
+
+    def find_nearest_segment_index(self, x_pos, y_pos):
+
+        nearest_index = 0
+        min_distance_sq = float('inf')
+        segment_count = len(self.trajectory)
+
+        if not self.closed_path:
+            segment_count -= 1
+
+        for index in range(segment_count):
+            start = self.trajectory[index]
+            end = self.next_point(index)
+            seg_dx = end['x'] - start['x']
+            seg_dy = end['y'] - start['y']
+            seg_len_sq = seg_dx * seg_dx + seg_dy * seg_dy
+
+            if seg_len_sq < 1e-9:
+                dx = start['x'] - x_pos
+                dy = start['y'] - y_pos
+                distance_sq = dx * dx + dy * dy
+            else:
+                projection = (
+                    (x_pos - start['x']) * seg_dx +
+                    (y_pos - start['y']) * seg_dy
+                ) / seg_len_sq
+                projection = max(0.0, min(1.0, projection))
+                closest_x = start['x'] + projection * seg_dx
+                closest_y = start['y'] + projection * seg_dy
+                dx = closest_x - x_pos
+                dy = closest_y - y_pos
+                distance_sq = dx * dx + dy * dy
+
+            if distance_sq < min_distance_sq:
+                min_distance_sq = distance_sq
                 nearest_index = index
 
         return nearest_index
 
-    def find_lookahead_index(self, start_index, lookahead_distance):
+    def goal_reached(self, goal_x, goal_y):
 
-        traversed_distance = 0.0
-        current_index = start_index
-
-        while traversed_distance < lookahead_distance:
-            next_index = current_index + 1
-
-            if next_index >= len(self.trajectory):
-                if not self.closed_path:
-                    return len(self.trajectory) - 1
-                next_index = 0
-
-            current_point = self.trajectory[current_index]
-            next_point = self.trajectory[next_index]
-            traversed_distance += math.hypot(
-                next_point['x'] - current_point['x'],
-                next_point['y'] - current_point['y'],
-            )
-
-            if next_index == start_index:
-                break
-
-            current_index = next_index
-
-        return current_index
+        tolerance = self.get_parameter(
+            'goal_tolerance'
+        ).get_parameter_value().double_value
+        return math.hypot(
+            goal_x - self.state['x'],
+            goal_y - self.state['y'],
+        ) <= tolerance
 
     def publish_command(self, linear_velocity, angular_velocity):
 

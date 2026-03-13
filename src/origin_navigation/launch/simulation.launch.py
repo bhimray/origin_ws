@@ -26,11 +26,14 @@ def generate_launch_description():
                 [*existing_paths, turtlebot3_models_dir]
             )
 
-    initial_x, initial_y = get_initial_waypoint()
+    default_path_preset = 'test_track'
+    initial_x, initial_y = get_initial_waypoint(default_path_preset)
     x_pose = LaunchConfiguration('x_pose')
     y_pose = LaunchConfiguration('y_pose')
+    path_preset = LaunchConfiguration('path_preset')
     closed_path = LaunchConfiguration('closed_path')
     cruise_speed = LaunchConfiguration('cruise_speed')
+    velocity_profile = LaunchConfiguration('velocity_profile')
 
     declare_x = DeclareLaunchArgument(
         'x_pose',
@@ -50,6 +53,16 @@ def generate_launch_description():
     declare_cruise_speed = DeclareLaunchArgument(
         'cruise_speed',
         default_value='0.3'
+    )
+
+    declare_path_preset = DeclareLaunchArgument(
+        'path_preset',
+        default_value=default_path_preset
+    )
+
+    declare_velocity_profile = DeclareLaunchArgument(
+        'velocity_profile',
+        default_value='trapezoidal'
     )
 
     gz_sim_resource_path = AppendEnvironmentVariable(
@@ -84,7 +97,7 @@ def generate_launch_description():
         name='waypoint_generator',
         output='screen',
         parameters=[{
-            'path_preset': 'test_track'
+            'path_preset': path_preset
         }]
     )
 
@@ -109,6 +122,7 @@ def generate_launch_description():
         output='screen',
         parameters=[{
             'closed_path': closed_path,
+            'velocity_profile': velocity_profile,
             'cruise_speed': cruise_speed,
             'acceleration': 0.5,
         }]
@@ -122,12 +136,13 @@ def generate_launch_description():
         output='screen',
         parameters=[{
             'closed_path': closed_path,
-            'max_linear_velocity': 0.32,
-            'max_angular_velocity': 1.8,
-            'lookahead_distance': 0.35,
-            'lookahead_gain': 0.6,
-            'heading_gain': 1.4,
-            'cross_track_gain': 1.0,
+            'max_linear_velocity': 0.16,
+            'max_angular_velocity': 2.2,
+            'front_axle_offset': 0.20,
+            'stanley_gain': 2.8,
+            'heading_gain': 1.6,
+            'softening_velocity': 0.05,
+            'speed_gain': 1.0,
         }]
     )
 
@@ -169,8 +184,10 @@ def generate_launch_description():
         ign_gazebo_resource_path,
         declare_x,
         declare_y,
+        declare_path_preset,
         declare_closed_path,
         declare_cruise_speed,
+        declare_velocity_profile,
 
         gazebo,
 

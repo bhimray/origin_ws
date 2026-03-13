@@ -17,6 +17,7 @@ class TrajectoryGenerator(Node):
 
         self.declare_parameter('cruise_speed', 0.3)
         self.declare_parameter('acceleration', 0.5)
+        self.declare_parameter('velocity_profile', 'trapezoidal')
         self.declare_parameter('closed_path', True)
 
         self.subscription = self.create_subscription(
@@ -48,6 +49,9 @@ class TrajectoryGenerator(Node):
         acceleration = self.get_parameter(
             'acceleration'
         ).get_parameter_value().double_value
+        velocity_profile = self.get_parameter(
+            'velocity_profile'
+        ).get_parameter_value().string_value
         closed_path = self.get_parameter(
             'closed_path'
         ).get_parameter_value().bool_value
@@ -56,6 +60,7 @@ class TrajectoryGenerator(Node):
             points,
             cruise_speed=cruise_speed,
             acceleration=acceleration,
+            velocity_profile=velocity_profile,
             closed_path=closed_path,
         )
 
