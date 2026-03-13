@@ -1,30 +1,65 @@
 from launch import LaunchDescription
+from launch.actions import AppendEnvironmentVariable
 from launch.actions import DeclareLaunchArgument
+from launch.actions import IncludeLaunchDescription
+from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
-from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.actions import IncludeLaunchDescription
 
 from ament_index_python.packages import get_package_share_directory
+from origin_navigation.path_config import get_initial_waypoint
 
 import os
+
 
 def generate_launch_description():
 
     turtlebot3_gazebo_dir = get_package_share_directory('turtlebot3_gazebo')
+    turtlebot3_models_dir = os.path.join(turtlebot3_gazebo_dir, 'models')
 
-    # Spawn position (first circle waypoint)
+    for env_var in ('GZ_SIM_RESOURCE_PATH', 'IGN_GAZEBO_RESOURCE_PATH'):
+        existing_paths = [
+            path for path in os.environ.get(env_var, '').split(os.pathsep) if path
+        ]
+        if turtlebot3_models_dir not in existing_paths:
+            os.environ[env_var] = os.pathsep.join(
+                [*existing_paths, turtlebot3_models_dir]
+            )
+
+    initial_x, initial_y = get_initial_waypoint()
     x_pose = LaunchConfiguration('x_pose')
     y_pose = LaunchConfiguration('y_pose')
+    closed_path = LaunchConfiguration('closed_path')
+    cruise_speed = LaunchConfiguration('cruise_speed')
 
     declare_x = DeclareLaunchArgument(
         'x_pose',
-        default_value='2.0'
+        default_value=str(initial_x)
     )
 
     declare_y = DeclareLaunchArgument(
         'y_pose',
-        default_value='0.0'
+        default_value=str(initial_y)
+    )
+
+    declare_closed_path = DeclareLaunchArgument(
+        'closed_path',
+        default_value='true'
+    )
+
+    declare_cruise_speed = DeclareLaunchArgument(
+        'cruise_speed',
+        default_value='0.3'
+    )
+
+    gz_sim_resource_path = AppendEnvironmentVariable(
+        'GZ_SIM_RESOURCE_PATH',
+        turtlebot3_models_dir
+    )
+
+    ign_gazebo_resource_path = AppendEnvironmentVariable(
+        'IGN_GAZEBO_RESOURCE_PATH',
+        turtlebot3_models_dir
     )
 
     # Launch Gazebo world
@@ -47,7 +82,10 @@ def generate_launch_description():
         package='origin_navigation',
         executable='waypoint_publisher',
         name='waypoint_generator',
-        output='screen'
+        output='screen',
+        parameters=[{
+            'path_preset': 'test_track'
+        }]
     )
 
     # Path smoothing
@@ -55,7 +93,12 @@ def generate_launch_description():
         package='origin_navigation',
         executable='path_smoother',
         name='path_smoother',
-        output='screen'
+        output='screen',
+        parameters=[{
+            'closed_path': closed_path,
+            'sample_spacing': 0.08,
+            'spline_smoothing': 0.02,
+        }]
     )
 
     # Trajectory generation
@@ -63,7 +106,12 @@ def generate_launch_description():
         package='origin_navigation',
         executable='trajectory_generator',
         name='trajectory_generator',
-        output='screen'
+        output='screen',
+        parameters=[{
+            'closed_path': closed_path,
+            'cruise_speed': cruise_speed,
+            'acceleration': 0.5,
+        }]
     )
 
     # Controller
@@ -71,7 +119,16 @@ def generate_launch_description():
         package='origin_navigation',
         executable='trajectory_controller',
         name='trajectory_controller',
-        output='screen'
+        output='screen',
+        parameters=[{
+            'closed_path': closed_path,
+            'max_linear_velocity': 0.32,
+            'max_angular_velocity': 1.8,
+            'lookahead_distance': 0.35,
+            'lookahead_gain': 0.6,
+            'heading_gain': 1.4,
+            'cross_track_gain': 1.0,
+        }]
     )
 
     # Odometry path for visual comparison against reference trajectory
@@ -108,8 +165,12 @@ def generate_launch_description():
 
     return LaunchDescription([
 
+        gz_sim_resource_path,
+        ign_gazebo_resource_path,
         declare_x,
         declare_y,
+        declare_closed_path,
+        declare_cruise_speed,
 
         gazebo,
 

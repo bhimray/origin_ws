@@ -1,9 +1,15 @@
-import rclpy
-from rclpy.node import Node
-from geometry_msgs.msg import TwistStamped, PoseArray
-from nav_msgs.msg import Odometry
 import math
-from tf_transformations import euler_from_quaternion
+
+import rclpy
+from geometry_msgs.msg import TwistStamped
+from nav_msgs.msg import Odometry, Path
+from rclpy.node import Node
+
+from .trajectory_math import (
+    normalize_angle,
+    quaternion_to_yaw,
+    target_speed_from_trajectory,
+)
 
 
 class TrajectoryController(Node):
@@ -12,8 +18,19 @@ class TrajectoryController(Node):
 
         super().__init__('trajectory_controller')
 
+        self.declare_parameter('closed_path', True)
+        self.declare_parameter('goal_tolerance', 0.12)
+        self.declare_parameter('lookahead_distance', 0.35)
+        self.declare_parameter('lookahead_gain', 0.8)
+        self.declare_parameter('heading_gain', 1.8)
+        self.declare_parameter('cross_track_gain', 1.0)
+        self.declare_parameter('max_linear_velocity', 0.35)
+        self.declare_parameter('max_angular_velocity', 1.8)
+        self.declare_parameter('control_rate_hz', 20.0)
+        self.declare_parameter('search_window', 60)
+
         self.subscription_path = self.create_subscription(
-            PoseArray,
+            Path,
             '/trajectory',
             self.path_callback,
             10
@@ -32,161 +49,225 @@ class TrajectoryController(Node):
             10
         )
 
-        self.path = []
-        self.index = 0
-        self.has_odom = False
-        self.current_x = 0.0
-        self.current_y = 0.0
+        control_rate = self.get_parameter(
+            'control_rate_hz'
+        ).get_parameter_value().double_value
+        self.timer = self.create_timer(1.0 / control_rate, self.control_loop)
 
-        self.velocity = 0.25
-        self.front_axle_offset = 0.20
-        self.heading_gain = 1.2
-        self.cross_track_gain = 1.0
-        self.stanley_gain = 0.8
-        self.softening_velocity = 0.05
-        self.goal_tolerance = 0.15
-        self.max_angular_velocity = 1.5
+        self.trajectory = []
+        self.closed_path = True
+        self.current_index = 0
+        self.state = None
 
+    def path_callback(self, msg):
 
-    def path_callback(self,msg): # receive trajectory points
+        trajectory = []
 
-        self.path = msg.poses
+        for pose_stamped in msg.poses:
+            stamp = pose_stamped.header.stamp
+            time_sec = float(stamp.sec) + float(stamp.nanosec) * 1e-9
+            trajectory.append({
+                'x': pose_stamped.pose.position.x,
+                'y': pose_stamped.pose.position.y,
+                'heading': quaternion_to_yaw(pose_stamped.pose.orientation),
+                'time_from_start': time_sec,
+            })
 
-        if len(self.path) == 0:
-            self.index = 0
+        self.trajectory = trajectory
+        self.closed_path = self.get_parameter(
+            'closed_path'
+        ).get_parameter_value().bool_value
+        self.current_index = 0
+
+    def odom_callback(self, msg):
+
+        pose = msg.pose.pose
+        twist = msg.twist.twist
+
+        self.state = {
+            'x': pose.position.x,
+            'y': pose.position.y,
+            'yaw': quaternion_to_yaw(pose.orientation),
+            'linear_velocity': twist.linear.x,
+        }
+
+    def control_loop(self):
+
+        if self.state is None or len(self.trajectory) < 2:
             return
 
-        # Keep progress when refreshed trajectory arrives.
-        if self.has_odom:
-            self.index = self.find_nearest_segment_index(
-                self.current_x,
-                self.current_y
-            )
-        else:
-            self.index = 0
-
-
-    def odom_callback(self,msg): # receive current position and orientation
-
-        if len(self.path) < 2:
+        if (
+            not self.closed_path and
+            self.goal_reached(self.state, self.trajectory[-1])
+        ):
+            self.publish_command(0.0, 0.0)
             return
 
-        if self.index >= len(self.path) - 1:
-            self.index = 0
+        reference_index = self.find_reference_index()
+        self.current_index = reference_index
 
-        x = msg.pose.pose.position.x
-        y = msg.pose.pose.position.y
-        self.current_x = x
-        self.current_y = y
-        self.has_odom = True
-
-        q = msg.pose.pose.orientation
-        quat = [q.x,q.y,q.z,q.w]
-
-        _,_,theta = euler_from_quaternion(quat)
-
-        goal = self.path[-1].position
-        goal_distance = math.hypot(goal.x - x, goal.y - y)
-
-        if goal_distance < self.goal_tolerance:
-            cmd = TwistStamped()
-            cmd.header.stamp = self.get_clock().now().to_msg()
-            cmd.header.frame_id = 'base_footprint'
-            self.publisher.publish(cmd)
-            return
-
-        front_x = x + self.front_axle_offset * math.cos(theta)
-        front_y = y + self.front_axle_offset * math.sin(theta)
-
-        self.index = self.find_nearest_segment_index(front_x, front_y)
-
-        start = self.path[self.index].position
-        end = self.path[self.index + 1].position
-
-        seg_dx = end.x - start.x
-        seg_dy = end.y - start.y
-        seg_len = math.hypot(seg_dx, seg_dy)
-
-        if seg_len < 1e-6:
-            return
-
-        path_heading = math.atan2(seg_dy, seg_dx)
-        heading_error = self.normalize_angle(path_heading - theta)
-
-        rel_x = front_x - start.x
-        rel_y = front_y - start.y
-
-        cross_track_error = (
-            rel_x * seg_dy - rel_y * seg_dx
-        ) / seg_len
-
-        cross_track_term = math.atan2(
-            self.stanley_gain * cross_track_error,
-            self.velocity + self.softening_velocity
+        desired_speed = target_speed_from_trajectory(
+            self.trajectory,
+            reference_index,
+            self.closed_path,
         )
+        max_linear_velocity = self.get_parameter(
+            'max_linear_velocity'
+        ).get_parameter_value().double_value
+        desired_speed = min(desired_speed, max_linear_velocity)
+
+        lookahead_distance = self.compute_lookahead_distance(desired_speed)
+        target_index = self.find_lookahead_index(
+            reference_index,
+            lookahead_distance,
+        )
+        target_point = self.trajectory[target_index]
+        reference_point = self.trajectory[reference_index]
+
+        dx = target_point['x'] - self.state['x']
+        dy = target_point['y'] - self.state['y']
+        distance_to_target = math.hypot(dx, dy)
+        heading_to_target = math.atan2(dy, dx)
+        alpha = normalize_angle(heading_to_target - self.state['yaw'])
+        heading_error = normalize_angle(
+            target_point['heading'] - self.state['yaw']
+        )
+        cross_track_error = self.compute_cross_track_error(reference_point)
+
+        if distance_to_target < 1e-3:
+            curvature = 0.0
+        else:
+            curvature = (
+                2.0 *
+                math.sin(alpha) /
+                max(distance_to_target, lookahead_distance)
+            )
+
+        linear_velocity = desired_speed * max(0.2, math.cos(alpha))
+        if not self.closed_path:
+            linear_velocity *= min(
+                1.0,
+                distance_to_target / max(lookahead_distance, 1e-6),
+            )
+
+        angular_velocity = (
+            linear_velocity * curvature +
+            self.get_parameter(
+                'heading_gain'
+            ).get_parameter_value().double_value * heading_error +
+            self.get_parameter(
+                'cross_track_gain'
+            ).get_parameter_value().double_value *
+            cross_track_error
+        )
+
+        max_angular_velocity = self.get_parameter(
+            'max_angular_velocity'
+        ).get_parameter_value().double_value
+        angular_velocity = max(
+            -max_angular_velocity,
+            min(max_angular_velocity, angular_velocity),
+        )
+
+        self.publish_command(linear_velocity, angular_velocity)
+
+    def compute_lookahead_distance(self, desired_speed):
+
+        base_distance = self.get_parameter(
+            'lookahead_distance'
+        ).get_parameter_value().double_value
+        lookahead_gain = self.get_parameter(
+            'lookahead_gain'
+        ).get_parameter_value().double_value
+        return max(base_distance, base_distance + lookahead_gain * desired_speed)
+
+    def goal_reached(self, state, goal):
+
+        distance = math.hypot(goal['x'] - state['x'], goal['y'] - state['y'])
+        tolerance = self.get_parameter(
+            'goal_tolerance'
+        ).get_parameter_value().double_value
+        return distance <= tolerance
+
+    def compute_cross_track_error(self, reference_point):
+
+        dx = self.state['x'] - reference_point['x']
+        dy = self.state['y'] - reference_point['y']
+        return (
+            -math.sin(reference_point['heading']) * dx +
+            math.cos(reference_point['heading']) * dy
+        )
+
+    def find_reference_index(self):
+
+        search_window = self.get_parameter(
+            'search_window'
+        ).get_parameter_value().integer_value
+
+        if self.closed_path:
+            candidate_indices = [
+                (self.current_index + offset) % len(self.trajectory)
+                for offset in range(search_window)
+            ]
+        else:
+            end_index = min(
+                len(self.trajectory),
+                max(self.current_index + search_window, search_window),
+            )
+            candidate_indices = list(range(self.current_index, end_index))
+            if not candidate_indices:
+                candidate_indices = list(range(len(self.trajectory)))
+
+        nearest_index = candidate_indices[0]
+        nearest_distance = float('inf')
+
+        for index in candidate_indices:
+            point = self.trajectory[index]
+            distance = math.hypot(
+                point['x'] - self.state['x'],
+                point['y'] - self.state['y'],
+            )
+            if distance < nearest_distance:
+                nearest_distance = distance
+                nearest_index = index
+
+        return nearest_index
+
+    def find_lookahead_index(self, start_index, lookahead_distance):
+
+        traversed_distance = 0.0
+        current_index = start_index
+
+        while traversed_distance < lookahead_distance:
+            next_index = current_index + 1
+
+            if next_index >= len(self.trajectory):
+                if not self.closed_path:
+                    return len(self.trajectory) - 1
+                next_index = 0
+
+            current_point = self.trajectory[current_index]
+            next_point = self.trajectory[next_index]
+            traversed_distance += math.hypot(
+                next_point['x'] - current_point['x'],
+                next_point['y'] - current_point['y'],
+            )
+
+            if next_index == start_index:
+                break
+
+            current_index = next_index
+
+        return current_index
+
+    def publish_command(self, linear_velocity, angular_velocity):
 
         cmd = TwistStamped()
         cmd.header.stamp = self.get_clock().now().to_msg()
         cmd.header.frame_id = 'base_footprint'
-
-        total_error = (
-            self.heading_gain * heading_error +
-            self.cross_track_gain * cross_track_term
-        )
-
-        # Slow down when the path error is large so the robot can settle.
-        if abs(total_error) > 0.8:
-            cmd.twist.linear.x = 0.05
-        elif abs(total_error) > 0.4:
-            cmd.twist.linear.x = 0.12
-        else:
-            cmd.twist.linear.x = self.velocity
-
-        cmd.twist.angular.z = max(
-            -self.max_angular_velocity,
-            min(self.max_angular_velocity, total_error)
-        )
-
-        self.publisher.publish(cmd) # publish velocity command
-
-
-    def find_nearest_segment_index(self, x, y):
-
-        nearest_index = 0
-        min_dist_sq = float('inf')
-
-        for i in range(len(self.path) - 1):
-            start = self.path[i].position
-            end = self.path[i + 1].position
-            seg_dx = end.x - start.x
-            seg_dy = end.y - start.y
-            seg_len_sq = seg_dx * seg_dx + seg_dy * seg_dy
-
-            if seg_len_sq < 1e-9:
-                dx = start.x - x
-                dy = start.y - y
-                dist_sq = dx * dx + dy * dy
-            else:
-                proj = (
-                    (x - start.x) * seg_dx + (y - start.y) * seg_dy
-                ) / seg_len_sq
-                proj = max(0.0, min(1.0, proj))
-                closest_x = start.x + proj * seg_dx
-                closest_y = start.y + proj * seg_dy
-                dx = closest_x - x
-                dy = closest_y - y
-                dist_sq = dx * dx + dy * dy
-
-            if dist_sq < min_dist_sq:
-                min_dist_sq = dist_sq
-                nearest_index = i
-
-        return nearest_index
-
-
-    def normalize_angle(self, angle):
-
-        return math.atan2(math.sin(angle), math.cos(angle))
+        cmd.twist.linear.x = linear_velocity
+        cmd.twist.angular.z = angular_velocity
+        self.publisher.publish(cmd)
 
 
 def main():
@@ -196,3 +277,6 @@ def main():
     node = TrajectoryController()
 
     rclpy.spin(node)
+
+    node.destroy_node()
+    rclpy.shutdown()

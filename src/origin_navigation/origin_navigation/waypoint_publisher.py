@@ -1,7 +1,11 @@
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import PoseArray, Pose
-import numpy as np
+
+from .path_config import (
+    DEFAULT_PATH_PRESET,
+    get_waypoints,
+)
 
 
 class WaypointPublisher(Node):
@@ -10,31 +14,25 @@ class WaypointPublisher(Node):
 
         super().__init__('waypoint_publisher')
 
-        self.publisher = self.create_publisher(PoseArray,'/waypoints',10)
+        self.declare_parameter('path_preset', DEFAULT_PATH_PRESET)
 
-        self.timer = self.create_timer(1.0,self.publish_waypoints)
+        self.publisher = self.create_publisher(PoseArray, '/waypoints', 10)
 
-        self.radius = 2.0
-        self.num_points = 12
+        self.timer = self.create_timer(1.0, self.publish_waypoints)
 
-        self.waypoints = []
-
-        for i in range(self.num_points):
-
-            theta = 2*np.pi*i/self.num_points
-
-            x = self.radius*np.cos(theta)
-            y = self.radius*np.sin(theta)
-
-            self.waypoints.append((x,y))
+        self.path_preset = self.get_parameter(
+            'path_preset'
+        ).get_parameter_value().string_value
+        self.waypoints = get_waypoints(self.path_preset)
 
 
     def publish_waypoints(self):
 
         msg = PoseArray()
-        msg.header.frame_id = "odom"
+        msg.header.frame_id = 'odom'
+        msg.header.stamp = self.get_clock().now().to_msg()
 
-        for x,y in self.waypoints:
+        for x, y in self.waypoints:
 
             pose = Pose()
             pose.position.x = float(x)
@@ -53,4 +51,5 @@ def main():
 
     rclpy.spin(node)
 
+    node.destroy_node()
     rclpy.shutdown()

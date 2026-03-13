@@ -3,14 +3,15 @@
 <package format="3">
   <name>origin_navigation</name>
   <version>0.0.0</version>
-  <description>TODO: Package description</description>
+  <description>Path smoothing and trajectory tracking for a differential-drive robot in ROS 2.</description>
   <maintainer email="bim@todo.todo">bim</maintainer>
-  <license>TODO: License declaration</license>
+  <license>MIT</license>
 
   <depend>rclpy</depend>
   <depend>geometry_msgs</depend>
   <depend>nav_msgs</depend>
   <depend>tf_transformations</depend>
+  <exec_depend>turtlebot3_gazebo</exec_depend>
   <exec_depend>python3-numpy</exec_depend>
   <exec_depend>python3-scipy</exec_depend>
   <exec_depend>python3-matplotlib</exec_depend>
