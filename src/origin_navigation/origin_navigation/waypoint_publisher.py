@@ -2,10 +2,7 @@ import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import PoseArray, Pose
 
-from .path_config import (
-    DEFAULT_PATH_PRESET,
-    get_waypoints,
-)
+from .path_config import get_waypoints
 
 
 class WaypointPublisher(Node):
@@ -14,16 +11,11 @@ class WaypointPublisher(Node):
 
         super().__init__('waypoint_publisher')
 
-        self.declare_parameter('path_preset', DEFAULT_PATH_PRESET)
-
         self.publisher = self.create_publisher(PoseArray, '/waypoints', 10)
 
         self.timer = self.create_timer(1.0, self.publish_waypoints)
 
-        self.path_preset = self.get_parameter(
-            'path_preset'
-        ).get_parameter_value().string_value
-        self.waypoints = get_waypoints(self.path_preset)
+        self.waypoints = get_waypoints()
 
 
     def publish_waypoints(self):

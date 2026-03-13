@@ -14,13 +14,11 @@ class TrajectoryController(Node):
 
         super().__init__('trajectory_controller')
 
-        self.declare_parameter('closed_path', True)
-        self.declare_parameter('goal_tolerance', 0.12)
         self.declare_parameter('front_axle_offset', 0.20)
-        self.declare_parameter('heading_gain', 1.6)
-        self.declare_parameter('stanley_gain', 2.8)
+        self.declare_parameter('heading_gain', 2.0)
+        self.declare_parameter('stanley_gain', 3.2)
         self.declare_parameter('softening_velocity', 0.05)
-        self.declare_parameter('speed_gain', 1.0)
+        self.declare_parameter('speed_gain', 1.2)
         self.declare_parameter('max_linear_velocity', 0.16)
         self.declare_parameter('max_angular_velocity', 2.2)
 
@@ -46,7 +44,6 @@ class TrajectoryController(Node):
 
         self.trajectory = []
         self.current_index = 0
-        self.closed_path = True
         self.state = None
 
     def path_callback(self, msg):
@@ -55,18 +52,12 @@ class TrajectoryController(Node):
             {
                 'x': pose_stamped.pose.position.x,
                 'y': pose_stamped.pose.position.y,
+                'desired_speed': pose_stamped.pose.position.z,
                 'heading': quaternion_to_yaw(pose_stamped.pose.orientation),
-                'time_from_start': (
-                    float(pose_stamped.header.stamp.sec) +
-                    float(pose_stamped.header.stamp.nanosec) * 1e-9
-                ),
             }
             for pose_stamped in msg.poses
         ]
 
-        self.closed_path = self.get_parameter(
-            'closed_path'
-        ).get_parameter_value().bool_value
         self.current_index = 0
 
     def odom_callback(self, msg):
@@ -82,13 +73,6 @@ class TrajectoryController(Node):
             'yaw': quaternion_to_yaw(pose.orientation),
             'linear_velocity': twist.linear.x,
         }
-
-        if (
-            not self.closed_path and
-            self.goal_reached(self.trajectory[-1]['x'], self.trajectory[-1]['y'])
-        ):
-            self.publish_command(0.0, 0.0)
-            return
 
         front_x, front_y = self.front_axle_position()
         segment_index = self.find_nearest_segment_index(front_x, front_y)
@@ -157,33 +141,12 @@ class TrajectoryController(Node):
 
         next_index = index + 1
         if next_index >= len(self.trajectory):
-            if self.closed_path:
-                return self.trajectory[0] # start from initial point
-            return self.trajectory[-1] # stay at last point
-        return self.trajectory[next_index] # return next point
+            return self.trajectory[0]
+        return self.trajectory[next_index]
 
     def reference_speed(self, index):
 
-        current = self.trajectory[index]
-        nxt = self.next_point(index)
-        #dis btwn two points (trajectory)
-        distance = math.hypot(
-            nxt['x'] - current['x'],
-            nxt['y'] - current['y'],
-        )
-        delta_time = nxt['time_from_start'] - current['time_from_start']
-
-        if self.closed_path and index == len(self.trajectory) - 1:
-            previous = self.trajectory[max(0, len(self.trajectory) - 2)]
-            delta_time = max(
-                current['time_from_start'] - previous['time_from_start'],
-                1e-6,
-            )
-
-        if delta_time <= 1e-6:
-            return 0.0
-
-        return distance / delta_time
+        return self.trajectory[index]['desired_speed']
 
     def command_speed(self, desired_speed, heading_error):
 
@@ -210,12 +173,8 @@ class TrajectoryController(Node):
 
         nearest_index = 0
         min_distance_sq = float('inf')
-        segment_count = len(self.trajectory)
 
-        if not self.closed_path:
-            segment_count -= 1
-
-        for index in range(segment_count):
+        for index in range(len(self.trajectory)):
             start = self.trajectory[index]
             end = self.next_point(index)
             seg_dx = end['x'] - start['x']
@@ -243,16 +202,6 @@ class TrajectoryController(Node):
                 nearest_index = index
 
         return nearest_index
-
-    def goal_reached(self, goal_x, goal_y):
-
-        tolerance = self.get_parameter(
-            'goal_tolerance'
-        ).get_parameter_value().double_value
-        return math.hypot(
-            goal_x - self.state['x'],
-            goal_y - self.state['y'],
-        ) <= tolerance
 
     def publish_command(self, linear_velocity, angular_velocity):
 

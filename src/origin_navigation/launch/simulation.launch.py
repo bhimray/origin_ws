@@ -26,14 +26,10 @@ def generate_launch_description():
                 [*existing_paths, turtlebot3_models_dir]
             )
 
-    default_path_preset = 'test_track'
-    initial_x, initial_y = get_initial_waypoint(default_path_preset)
+    initial_x, initial_y = get_initial_waypoint()
     x_pose = LaunchConfiguration('x_pose')
     y_pose = LaunchConfiguration('y_pose')
-    path_preset = LaunchConfiguration('path_preset')
-    closed_path = LaunchConfiguration('closed_path')
     cruise_speed = LaunchConfiguration('cruise_speed')
-    velocity_profile = LaunchConfiguration('velocity_profile')
 
     declare_x = DeclareLaunchArgument(
         'x_pose',
@@ -45,24 +41,9 @@ def generate_launch_description():
         default_value=str(initial_y)
     )
 
-    declare_closed_path = DeclareLaunchArgument(
-        'closed_path',
-        default_value='true'
-    )
-
     declare_cruise_speed = DeclareLaunchArgument(
         'cruise_speed',
         default_value='0.3'
-    )
-
-    declare_path_preset = DeclareLaunchArgument(
-        'path_preset',
-        default_value=default_path_preset
-    )
-
-    declare_velocity_profile = DeclareLaunchArgument(
-        'velocity_profile',
-        default_value='trapezoidal'
     )
 
     gz_sim_resource_path = AppendEnvironmentVariable(
@@ -96,9 +77,6 @@ def generate_launch_description():
         executable='waypoint_publisher',
         name='waypoint_generator',
         output='screen',
-        parameters=[{
-            'path_preset': path_preset
-        }]
     )
 
     # Path smoothing
@@ -108,7 +86,6 @@ def generate_launch_description():
         name='path_smoother',
         output='screen',
         parameters=[{
-            'closed_path': closed_path,
             'sample_spacing': 0.08,
             'spline_smoothing': 0.02,
         }]
@@ -121,8 +98,6 @@ def generate_launch_description():
         name='trajectory_generator',
         output='screen',
         parameters=[{
-            'closed_path': closed_path,
-            'velocity_profile': velocity_profile,
             'cruise_speed': cruise_speed,
             'acceleration': 0.5,
         }]
@@ -135,7 +110,6 @@ def generate_launch_description():
         name='trajectory_controller',
         output='screen',
         parameters=[{
-            'closed_path': closed_path,
             'max_linear_velocity': 0.16,
             'max_angular_velocity': 2.2,
             'front_axle_offset': 0.20,
@@ -184,10 +158,7 @@ def generate_launch_description():
         ign_gazebo_resource_path,
         declare_x,
         declare_y,
-        declare_path_preset,
-        declare_closed_path,
         declare_cruise_speed,
-        declare_velocity_profile,
 
         gazebo,
 

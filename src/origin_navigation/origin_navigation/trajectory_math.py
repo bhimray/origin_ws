@@ -59,7 +59,7 @@ def cumulative_distances(points):
     return cumulative
 
 
-def estimate_headings(points, closed_path):
+def estimate_headings(points):
 
     if not points:
         return []
@@ -72,12 +72,8 @@ def estimate_headings(points, closed_path):
             headings.append(0.0)
             continue
 
-        if closed_path:
-            prev_index = (index - 1) % total_points
-            next_index = (index + 1) % total_points
-        else:
-            prev_index = max(0, index - 1)
-            next_index = min(total_points - 1, index + 1)
+        prev_index = (index - 1) % total_points
+        next_index = (index + 1) % total_points
 
         prev_x, prev_y = points[prev_index]
         next_x, next_y = points[next_index]
@@ -101,7 +97,6 @@ def smooth_waypoints(
     waypoints,
     sample_spacing=0.05,
     spline_smoothing=0.0,
-    closed_path=True,
 ):
 
     if len(waypoints) < 2:
@@ -117,12 +112,12 @@ def smooth_waypoints(
     tck, _ = splprep(
         [x_points, y_points],
         s=spline_smoothing,
-        per=closed_path,
+        per=True,
         k=spline_degree,
     )
 
     dense_samples = max(200, len(waypoints) * 25)
-    dense_u = np.linspace(0.0, 1.0, dense_samples, endpoint=not closed_path)
+    dense_u = np.linspace(0.0, 1.0, dense_samples, endpoint=False)
     dense_x, dense_y = splev(dense_u, tck)
     dense_points = list(zip(dense_x, dense_y))
 
@@ -133,20 +128,12 @@ def smooth_waypoints(
         return [(float(x_points[0]), float(y_points[0]))]
 
     sample_count = max(2, int(math.ceil(total_length / sample_spacing)))
-    if closed_path:
-        target_distances = np.linspace(
-            0.0,
-            total_length,
-            sample_count,
-            endpoint=False,
-        )
-    else:
-        target_distances = np.linspace(
-            0.0,
-            total_length,
-            sample_count + 1,
-            endpoint=True,
-        )
+    target_distances = np.linspace(
+        0.0,
+        total_length,
+        sample_count,
+        endpoint=False,
+    )
 
     resampled_x = np.interp(target_distances, arc_lengths, dense_x)
     resampled_y = np.interp(target_distances, arc_lengths, dense_y)
@@ -240,8 +227,6 @@ def generate_timed_trajectory(
     points,
     cruise_speed=0.3,
     acceleration=0.4,
-    velocity_profile='trapezoidal',
-    closed_path=True,
 ):
 
     if not points:
@@ -249,29 +234,25 @@ def generate_timed_trajectory(
 
     distances = cumulative_distances(points)
     path_length = distances[-1]
-    headings = estimate_headings(points, closed_path)
+    headings = estimate_headings(points)
 
     trajectory = []
 
     for index, (point, distance, heading) in enumerate(
         zip(points, distances, headings)
     ):
-        if velocity_profile == 'constant':
-            time_from_start = distance / max(cruise_speed, 1e-6)
-            desired_speed = cruise_speed
-        else:
-            time_from_start = time_at_distance(
-                distance,
-                path_length,
-                cruise_speed,
-                acceleration,
-            )
-            desired_speed = trapezoidal_speed_at_distance(
-                distance,
-                path_length,
-                cruise_speed,
-                acceleration,
-            )
+        time_from_start = time_at_distance(
+            distance,
+            path_length,
+            cruise_speed,
+            acceleration,
+        )
+        desired_speed = trapezoidal_speed_at_distance(
+            distance,
+            path_length,
+            cruise_speed,
+            acceleration,
+        )
 
         trajectory.append({
             'index': index,
@@ -283,32 +264,3 @@ def generate_timed_trajectory(
         })
 
     return trajectory
-
-
-def target_speed_from_trajectory(trajectory, index, closed_path):
-
-    if len(trajectory) < 2:
-        return 0.0
-
-    next_index = index + 1
-    if next_index >= len(trajectory):
-        if not closed_path:
-            next_index = len(trajectory) - 1
-        else:
-            next_index = 0
-
-    current = trajectory[index]
-    nxt = trajectory[next_index]
-    dx = nxt['x'] - current['x']
-    dy = nxt['y'] - current['y']
-    distance = math.hypot(dx, dy)
-    delta_time = nxt['time_from_start'] - current['time_from_start']
-
-    if closed_path and next_index == 0:
-        loop_time = trajectory[-1]['time_from_start']
-        delta_time = max(loop_time - current['time_from_start'], 1e-6)
-
-    if delta_time <= 1e-6:
-        return 0.0
-
-    return distance / delta_time

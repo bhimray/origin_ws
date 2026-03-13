@@ -18,7 +18,6 @@ class PathSmoother(Node):
 
         self.declare_parameter('sample_spacing', 0.05)
         self.declare_parameter('spline_smoothing', 0.02)
-        self.declare_parameter('closed_path', True)
 
         self.subscription = self.create_subscription(
             PoseArray,
@@ -50,17 +49,12 @@ class PathSmoother(Node):
         spline_smoothing = self.get_parameter(
             'spline_smoothing'
         ).get_parameter_value().double_value
-        closed_path = self.get_parameter(
-            'closed_path'
-        ).get_parameter_value().bool_value
-
         smoothed_points = smooth_waypoints(
             waypoints,
             sample_spacing=sample_spacing,
             spline_smoothing=spline_smoothing,
-            closed_path=closed_path,
         )
-        headings = estimate_headings(smoothed_points, closed_path)
+        headings = estimate_headings(smoothed_points)
 
         path = Path()
         path.header.frame_id = 'odom'
@@ -78,7 +72,7 @@ class PathSmoother(Node):
 
             path.poses.append(pose)
 
-        if closed_path and len(path.poses) > 0:
+        if len(path.poses) > 0:
             path.poses.append(path.poses[0])
 
         self.publisher.publish(path)
