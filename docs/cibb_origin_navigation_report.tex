@@ -1,0 +1,192 @@
+\documentclass[12pt,a4paper]{cibb}
+
+% Fallback definition for missing \@ordinalM
+\makeatletter
+\providecommand{\@ordinalM}[2]{#1}
+\makeatother
+
+\usepackage{subfigure,graphicx}
+\usepackage{amsmath,amsfonts,latexsym,amssymb,euscript,xr}
+\usepackage{booktabs}
+\usepackage[nodayofweek]{datetime}
+\usepackage{hyperref}
+\usepackage{fmtcount}
+\usepackage[english]{datenumber}
+\usepackage[absolute]{textpos}
+\usepackage[table]{xcolor}
+\usepackage{color,colortbl,tabularx}
+\usepackage[english]{babel}
+\usepackage[protrusion=true,expansion=true]{microtype}
+\usepackage{amsmath,amsfonts,amsthm}
+\usepackage{pifont}
+
+\def\red{\color{red}}
+\def\black{\color{black}}
+\def\blue{\color{blue}}
+\def\magenta{\color{magenta}}
+
+\definecolor{LightBlue}{rgb}{0.88,0.9,0.9}
+
+\newcommand\blfootnote[1]{%
+  \begingroup
+  \renewcommand\thefootnote{}\footnote{#1}%
+  \addtocounter{footnote}{-1}%
+  \endgroup
+}
+
+\title{\Large $\ $\\ \bf Spline-Based Trajectory Generation and Stanley Tracking for Differential-Drive Navigation in ROS 2}
+
+\author{\large First Author}
+\address{\footnotesize $\ $\\$^1$ Affiliation, city, country. \\
+Email: author@example.com}
+
+\begin{document}
+
+\renewcommand{\thefootnote}{}
+\footnotetext{\small{Article version: \datedate $\;$ h\currenttime $\;$ CET}}
+
+\thispagestyle{myheadings}
+\pagestyle{myheadings}
+\markright{\tt Proceedings of CIBB 2026}
+
+\section{Introduction}
+\label{sec:SCIENTIFIC-BACKGROUND}
+
+Reliable path tracking is a central requirement for mobile robots operating in structured indoor and laboratory environments. In this work we present a compact ROS~2 navigation stack for a differential-drive robot simulated in TurtleBot3 Gazebo. The package focuses on the full path-following pipeline: waypoint generation, geometric path smoothing, time-parameterized trajectory generation, closed-loop tracking, and quantitative performance logging.
+
+The implementation is intentionally lightweight and modular. Waypoints are produced from predefined path presets, including circular, clover, Lissajous, switchback, and test-track layouts. A spline-based smoother converts sparse waypoints into a dense reference path. A trajectory generator assigns headings and timestamps to each sampled point, and a controller combines heading regulation with a Stanley-style cross-track correction term~\cite{thrun2006stanley}. Finally, a metrics logger records tracking error and velocity signals for offline evaluation.
+
+The goal of this report is to document the design of the pipeline and summarize one representative simulation run using the default \texttt{test\_track} preset in closed-loop mode.
+
+\section{Data and Methods}
+\label{sec:DATA-AND-METHODS}
+
+\subsection{System architecture}
+
+The navigation package is implemented as an \texttt{ament\_python} ROS~2 package and uses \texttt{rclpy}, \texttt{geometry\_msgs}, and \texttt{nav\_msgs}. The launch file starts the following nodes:
+
+\begin{enumerate}
+\item \texttt{waypoint\_publisher}, which publishes the selected waypoint preset as a \texttt{PoseArray};
+\item \texttt{path\_smoother}, which generates a dense \texttt{nav\_msgs/Path};
+\item \texttt{trajectory\_generator}, which time-parameterizes the path;
+\item \texttt{trajectory\_controller}, which computes velocity commands from odometry feedback;
+\item \texttt{navigation\_metrics\_logger}, which stores performance measurements to CSV.
+\end{enumerate}
+
+The experiments reported here were produced with the default launch configuration: \texttt{path\_preset=test\_track}, \texttt{closed\_path=true}, \texttt{sample\_spacing=0.08\,m}, \texttt{spline\_smoothing=0.02}, \texttt{cruise\_speed=0.3\,m/s}, \texttt{acceleration=0.5\,m/s$^2$}, \texttt{max\_linear\_velocity=0.16\,m/s}, and \texttt{max\_angular\_velocity=2.2\,rad/s}.
+
+\subsection{Waypoint generation and smoothing}
+
+Each path preset returns a set of planar waypoints $(x_i, y_i)$, shifted so that the first waypoint becomes the origin. This simplifies robot initialization in simulation. To obtain a continuous path, the waypoints are smoothed with SciPy's parametric spline tools \texttt{splprep} and \texttt{splev}~\cite{scipy_splprep}. The resulting dense curve is then resampled at approximately uniform arc-length spacing:
+
+\begin{equation}
+s_k = k \Delta s, \qquad k = 0, \ldots, N-1,
+\label{eq:arc_length_sampling}
+\end{equation}
+
+where $\Delta s$ is the user-defined sample spacing. Path headings are estimated from neighboring points using finite differences. For closed paths, the heading computation wraps around the first and last samples.
+
+\subsection{Timed trajectory generation}
+
+The smoothed path is converted into a timed trajectory by attaching a heading and a timestamp to each sampled point. For open paths, the software supports constant-speed and trapezoidal-speed timing. For the closed-loop experiment reported here, the implementation uses constant nominal timing around the loop, so the timestamp of point $i$ is computed from the cumulative arc length $d_i$ as
+
+\begin{equation}
+t_i = \frac{d_i}{v_c},
+\label{eq:time_parameterization}
+\end{equation}
+
+where $v_c$ is the cruise speed. This produces a reference speed profile that is approximately uniform along the track.
+
+\subsection{Trajectory tracking}
+
+The controller uses the robot odometry and projects the control point to the front axle position:
+
+\begin{equation}
+x_f = x + L \cos \psi, \qquad y_f = y + L \sin \psi,
+\label{eq:front_axle}
+\end{equation}
+
+where $(x, y, \psi)$ is the robot pose and $L$ is the front-axle offset. The nearest path segment is selected, and the controller computes the heading error $e_\psi$ and cross-track error $e_c$. The commanded angular velocity follows a Stanley-style law:
+
+\begin{equation}
+\omega = k_h e_\psi + \arctan\left(\frac{k_s e_c}{v + \epsilon}\right),
+\label{eq:stanley_like}
+\end{equation}
+
+where $k_h$ is the heading gain, $k_s$ is the Stanley gain, $v$ is the commanded linear speed, and $\epsilon$ is a softening term used to avoid division by zero at low speeds. The linear speed command is regulated toward the reference speed while reducing speed under large heading errors:
+
+\begin{equation}
+v = \mathrm{sat}\left(v_{\mathrm{cur}} + k_v \left(\alpha v_{\mathrm{ref}} - v_{\mathrm{cur}}\right)\right),
+\label{eq:speed_command}
+\end{equation}
+
+where $v_{\mathrm{cur}}$ is the measured linear speed, $k_v$ is a speed gain, $\mathrm{sat}(\cdot)$ enforces velocity limits, and $\alpha \in [0.15, 1]$ is a heading-dependent scaling factor.
+
+\subsection{\bf \it Evaluation protocol}
+\label{sec:TABLES-AND-FIGURES}
+
+The metrics logger stores, at each odometry update, the robot position, nearest reference point, path error, heading error, linear velocity, and angular velocity. The CSV file generated in the current workspace contains 5265 samples over a run lasting 105.28\,s. Summary statistics reported below were computed from \texttt{results/navigation\_metrics.csv}.
+
+\section{Results}
+\label{sec:RESULTS}
+
+The default configuration produced stable path following on the \texttt{test\_track} loop. The mean path-tracking error was 0.0366\,m and the root-mean-square error was 0.0407\,m, indicating that the robot remained close to the spline reference for most of the experiment. The maximum path error was 0.0917\,m, remaining below 10\,cm throughout the recorded run.
+
+Heading regulation was more demanding than lateral tracking, especially at startup and on sharper curvature transitions. The mean absolute heading error was $18.16^\circ$, while the maximum absolute heading error reached $72.05^\circ$. This pattern is consistent with a controller that prioritizes rapid recovery from initial orientation mismatch and localized curvature changes while still preserving small lateral deviation.
+
+The velocity signals also reflect the controller constraints. The mean linear velocity was 0.1426\,m/s with a peak of 0.1957\,m/s, close to but slightly above the configured nominal limit due to the use of measured odometry in the logged data rather than only commanded values. The mean absolute angular velocity was 0.1317\,rad/s, and the peak angular velocity reached the configured saturation of 2.2\,rad/s.
+
+\begin{table}[httb!] \small
+\centering
+    \begin{tabularx}{0.7\textwidth}{ l  c  c }
+        \toprule
+          \textbf{metric} & \textbf{value} & \textbf{unit} \\
+        \midrule
+        \rowcolor{LightBlue} Duration & 105.28 & s \\
+        Number of samples & 5265 & -- \\
+        \rowcolor{LightBlue} Mean path error & 0.0366 & m \\
+        Path error RMSE & 0.0407 & m \\
+        \rowcolor{LightBlue} Max path error & 0.0917 & m \\
+        Mean abs. heading error & 18.16 & deg \\
+        \rowcolor{LightBlue} Max abs. heading error & 72.05 & deg \\
+        Mean linear velocity & 0.1426 & m/s \\
+        \rowcolor{LightBlue} Max linear velocity & 0.1957 & m/s \\
+        Mean abs. angular velocity & 0.1317 & rad/s \\
+        \rowcolor{LightBlue} Max abs. angular velocity & 2.2000 & rad/s \\
+        \bottomrule
+    \end{tabularx}
+    \caption{\textbf{Navigation performance on the default closed-loop test track}.
+    Statistics computed from the recorded ROS~2 navigation metrics log.\label{tab:RESULTS}}
+\end{table}
+
+The generated plots available in the repository support the same conclusion. The trajectory plot shows close agreement between the smoothed reference path and the realized odometry trace, while the temporal plots show bounded path error and limited oscillatory control effort. If these images are uploaded to Overleaf under \texttt{images/}, they can be inserted directly using the filenames generated by the plotting script, for example \texttt{trajectory\_xy.png} and \texttt{path\_error.png}.
+
+\section{Conclusion}
+\label{sec:CONCLUSIONS}
+
+This report presented a ROS~2 navigation pipeline for differential-drive trajectory tracking in simulation. The system combines predefined path generation, spline-based smoothing, time-parameterized trajectory generation, Stanley-inspired steering correction, and automatic metric logging. In the default \texttt{test\_track} experiment, the method achieved sub-decimeter maximum path error and approximately 4\,cm RMS tracking error over more than 100\,s of closed-loop operation.
+
+The current implementation is modular enough to support further extensions. Immediate next steps include curvature-aware speed planning for closed paths, comparison against pure-pursuit or MPC controllers, and evaluation across multiple waypoint presets and noise conditions. The package therefore provides a practical baseline for reproducible robot-navigation experiments in ROS~2.
+
+\section*{Conflict of interests}
+\label{sec:CONFLICT-OF-INTERESTS}
+The authors declare no conflict of interest.
+
+\section*{Acknowledgments (optional)}
+\label{sec:ACKNOWLEDGMENTS}
+The authors acknowledge the open-source ROS~2, TurtleBot3, NumPy, SciPy, and Matplotlib communities for the software infrastructure used in this work.
+
+\section*{Funding (optional)}
+\label{sec:FUNDING}
+This study did not receive external funding.
+
+\section*{Availability of data and software code (optional and strongly suggested)}
+\label{sec:AVAILABILITY}
+The source code, launch files, unit tests, metrics CSV, and generated plots are available in the project workspace. The main package is located in \texttt{src/origin\_navigation}, while the evaluation output used in this report is stored in \texttt{results/navigation\_metrics.csv} and \texttt{results/navigation\_plots/}.
+
+\footnotesize
+\bibliographystyle{unsrt}
+\bibliography{cibb_origin_navigation_report}
+\normalsize
+
+\end{document}

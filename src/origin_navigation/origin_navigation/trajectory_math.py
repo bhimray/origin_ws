@@ -39,7 +39,8 @@ def pairwise_distances(points):
         return []
 
     distances = []
-
+    
+    #finding the distance between each consecutive pair of points
     for index in range(1, len(points)):
         dx = points[index][0] - points[index - 1][0]
         dy = points[index][1] - points[index - 1][1]
@@ -160,6 +161,7 @@ def trapezoidal_time_profile(path_length, cruise_speed, acceleration):
     if path_length <= 0.0:
         return 0.0, 0.0, 0.0, 0.0
 
+    # V^2 = U^2 + 2 * a * s     
     accel_distance = (cruise_speed * cruise_speed) / (2.0 * acceleration)
 
     if 2.0 * accel_distance <= path_length:
@@ -254,26 +256,22 @@ def generate_timed_trajectory(
     for index, (point, distance, heading) in enumerate(
         zip(points, distances, headings)
     ):
-        if closed_path:
+        if velocity_profile == 'constant':
             time_from_start = distance / max(cruise_speed, 1e-6)
             desired_speed = cruise_speed
         else:
-            if velocity_profile == 'constant':
-                time_from_start = distance / max(cruise_speed, 1e-6)
-                desired_speed = cruise_speed
-            else:
-                time_from_start = time_at_distance(
-                    distance,
-                    path_length,
-                    cruise_speed,
-                    acceleration,
-                )
-                desired_speed = trapezoidal_speed_at_distance(
-                    distance,
-                    path_length,
-                    cruise_speed,
-                    acceleration,
-                )
+            time_from_start = time_at_distance(
+                distance,
+                path_length,
+                cruise_speed,
+                acceleration,
+            )
+            desired_speed = trapezoidal_speed_at_distance(
+                distance,
+                path_length,
+                cruise_speed,
+                acceleration,
+            )
 
         trajectory.append({
             'index': index,

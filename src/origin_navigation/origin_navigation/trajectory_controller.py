@@ -158,14 +158,15 @@ class TrajectoryController(Node):
         next_index = index + 1
         if next_index >= len(self.trajectory):
             if self.closed_path:
-                return self.trajectory[0]
-            return self.trajectory[-1]
-        return self.trajectory[next_index]
+                return self.trajectory[0] # start from initial point
+            return self.trajectory[-1] # stay at last point
+        return self.trajectory[next_index] # return next point
 
     def reference_speed(self, index):
 
         current = self.trajectory[index]
         nxt = self.next_point(index)
+        #dis btwn two points (trajectory)
         distance = math.hypot(
             nxt['x'] - current['x'],
             nxt['y'] - current['y'],
@@ -191,6 +192,7 @@ class TrajectoryController(Node):
         ).get_parameter_value().double_value
         desired_speed = min(desired_speed, max_linear_velocity)
 
+        # scaling parameter for speed based on heading error
         heading_scale = max(0.15, 1.0 - abs(heading_error) / 1.6)
         desired_speed *= heading_scale
 
