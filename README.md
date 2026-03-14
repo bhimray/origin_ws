@@ -201,14 +201,14 @@ python3 src/origin_navigation/scripts/plot_navigation_metrics.py
 - Add a safety layer for emergency stop, stale trajectory detection, and watchdog
   behavior.
 
-## Extra credit: obstacle avoidance
+## Obstacle avoidance
 
 The cleanest extension is to keep the current stack and add a local planner or
 reactive avoidance layer between trajectory generation and tracking. Two common
 options are:
 
-- sample trajectory rollouts and score them against an occupancy grid
 - add a local obstacle repulsion term that deforms the reference path online
+- Use algorithm that can directly take constraint and obstacle into consideration
 
 In a production robot, obstacle avoidance should consume live sensor data and
 modify either the local target or the short planning horizon, not the original
@@ -218,7 +218,7 @@ global waypoint list in place.
 
 AI assistance was used to accelerate:
 
-- codebase understanding
-- controller and trajectory design iteration
+- Sample waypoint generation
+- debugging and implementing the code
 - documentation drafting
 - unit test scaffolding
