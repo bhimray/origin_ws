@@ -1,3 +1,11 @@
+"""Attach timing, heading, and desired speed information to the smoothed path.
+
+This node subscribes to `/smooth_path`, computes a time-parameterized trajectory
+using the configured cruise speed and acceleration, stores desired speed in the
+`z` position field, updates pose orientation from the path heading, and
+publishes the result on `/trajectory`.
+"""
+
 import rclpy
 from nav_msgs.msg import Path
 from rclpy.duration import Duration
@@ -63,7 +71,6 @@ class TrajectoryGenerator(Node):
                 start_time +
                 Duration(seconds=point['time_from_start'])
             ).to_msg()
-            # Store the precomputed speed profile with each path sample.
             source_pose.pose.position.z = point['desired_speed']
             _, _, qz, qw = quaternion_from_yaw(point['heading'])
             source_pose.pose.orientation.z = qz

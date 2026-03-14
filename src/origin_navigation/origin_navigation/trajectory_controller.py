@@ -1,3 +1,11 @@
+"""Track the generated trajectory using odometry feedback and Stanley-style steering.
+
+This node subscribes to `/trajectory` for the reference path and `/odom` for the
+robot state. It selects the nearest path segment to the front-axle control
+point, computes heading and cross-track errors, then publishes linear and
+angular velocity commands on `/cmd_vel`.
+"""
+
 import math
 
 import rclpy
@@ -155,7 +163,6 @@ class TrajectoryController(Node):
         ).get_parameter_value().double_value
         desired_speed = min(desired_speed, max_linear_velocity)
 
-        # scaling parameter for speed based on heading error
         heading_scale = max(0.15, 1.0 - abs(heading_error) / 1.6)
         desired_speed *= heading_scale
 

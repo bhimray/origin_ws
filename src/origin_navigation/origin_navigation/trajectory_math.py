@@ -1,3 +1,10 @@
+"""Provide shared geometry, heading, smoothing, and timing utilities.
+
+This module contains helpers for angle and quaternion conversion, waypoint
+distance accumulation, heading estimation, spline-based path smoothing, and
+trapezoidal timing calculations used to build the reference trajectory.
+"""
+
 import math
 
 import numpy as np
@@ -39,8 +46,7 @@ def pairwise_distances(points):
         return []
 
     distances = []
-    
-    #finding the distance between each consecutive pair of points
+
     for index in range(1, len(points)):
         dx = points[index][0] - points[index - 1][0]
         dy = points[index][1] - points[index - 1][1]
@@ -148,7 +154,6 @@ def trapezoidal_time_profile(path_length, cruise_speed, acceleration):
     if path_length <= 0.0:
         return 0.0, 0.0, 0.0, 0.0
 
-    # V^2 = U^2 + 2 * a * s     
     accel_distance = (cruise_speed * cruise_speed) / (2.0 * acceleration)
 
     if 2.0 * accel_distance <= path_length:

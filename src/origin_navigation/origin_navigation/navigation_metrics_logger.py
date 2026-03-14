@@ -61,12 +61,11 @@ class NavigationMetricsLogger(Node):
         q = msg.pose.pose.orientation
         yaw = self.yaw_from_quaternion(q.x, q.y, q.z, q.w)
 
-        nearest_index, path_error = self.find_nearest_point(x, y)
+        nearest_index, path_error, desired_heading = self.find_nearest_segment(
+            x,
+            y,
+        )
         ref_x, ref_y = self.path_points[nearest_index]
-        target_index = (nearest_index + 1) % len(self.path_points)
-
-        tx, ty = self.path_points[target_index]
-        desired_heading = math.atan2(ty - y, tx - x)
         heading_error = self.normalize_angle(desired_heading - yaw)
 
         linear_velocity = msg.twist.twist.linear.x
@@ -90,21 +89,40 @@ class NavigationMetricsLogger(Node):
             'angular_velocity_radps': angular_velocity,
         })
 
-    def find_nearest_point(self, x, y):
+    def find_nearest_segment(self, x, y):
 
         nearest_index = 0
-        min_distance = float('inf')
+        min_distance_sq = float('inf')
+        nearest_heading = 0.0
 
-        for index, (px, py) in enumerate(self.path_points):
-            dx = x - px
-            dy = y - py
-            distance = math.hypot(dx, dy)
+        for index in range(len(self.path_points) - 1):
+            start_x, start_y = self.path_points[index]
+            end_x, end_y = self.path_points[index + 1]
+            seg_dx = end_x - start_x
+            seg_dy = end_y - start_y
+            seg_len_sq = seg_dx * seg_dx + seg_dy * seg_dy
 
-            if distance < min_distance:
-                min_distance = distance
+            if seg_len_sq < 1e-9:
+                dx = start_x - x
+                dy = start_y - y
+                distance_sq = dx * dx + dy * dy
+            else:
+                projection = (
+                    (x - start_x) * seg_dx + (y - start_y) * seg_dy
+                ) / seg_len_sq
+                projection = max(0.0, min(1.0, projection))
+                closest_x = start_x + projection * seg_dx
+                closest_y = start_y + projection * seg_dy
+                dx = closest_x - x
+                dy = closest_y - y
+                distance_sq = dx * dx + dy * dy
+
+            if distance_sq < min_distance_sq:
+                min_distance_sq = distance_sq
                 nearest_index = index
+                nearest_heading = math.atan2(seg_dy, seg_dx)
 
-        return nearest_index, min_distance
+        return nearest_index, math.sqrt(min_distance_sq), nearest_heading
 
     @staticmethod
     def yaw_from_quaternion(x, y, z, w):
