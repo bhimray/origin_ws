@@ -125,16 +125,16 @@ where $v_{\mathrm{cur}}$ is the measured linear speed, $k_v$ is a speed gain, $\
 \subsection{\bf \it Evaluation protocol}
 \label{sec:TABLES-AND-FIGURES}
 
-The metrics logger stores, at each odometry update, the robot position, nearest reference point, path error, heading error, linear velocity, and angular velocity. The CSV file generated in the current workspace contains 5265 samples over a run lasting 105.28\,s. Summary statistics reported below were computed from \texttt{results/navigation\_metrics.csv}.
+The metrics logger stores, at each odometry update, the robot position, nearest reference point, path error, heading error, linear velocity, and angular velocity. The CSV file generated in the current workspace contains 6190 samples over a run lasting 123.78\,s. Summary statistics reported below were computed from \texttt{results/navigation\_metrics.csv}.
 
 \section{Results}
 \label{sec:RESULTS}
 
-The default configuration produced stable path following on the \texttt{test\_track} loop. The mean path-tracking error was 0.0366\,m and the root-mean-square error was 0.0407\,m, indicating that the robot remained close to the spline reference for most of the experiment. The maximum path error was 0.0917\,m, remaining below 10\,cm throughout the recorded run.
+The default configuration produced stable path following on the \texttt{test\_track} loop. The mean path-tracking error was 0.0226\,m and the root-mean-square error was 0.0297\,m, indicating that the robot remained close to the spline reference for most of the experiment. The maximum path error was 0.0846\,m, remaining below 10\,cm throughout the recorded run.
 
-Heading regulation was more demanding than lateral tracking, especially at startup and on sharper curvature transitions. The mean absolute heading error was $18.16^\circ$, while the maximum absolute heading error reached $72.05^\circ$. This pattern is consistent with a controller that prioritizes rapid recovery from initial orientation mismatch and localized curvature changes while still preserving small lateral deviation.
+Heading regulation was substantially better in the updated metrics log. The mean absolute heading error was $4.08^\circ$, while the maximum absolute heading error reached $48.44^\circ$. This indicates that most of the run stayed well aligned with the local path tangent, with larger deviations concentrated in transient recovery periods and sharper curvature transitions.
 
-The velocity signals also reflect the controller constraints. The mean linear velocity was 0.1426\,m/s with a peak of 0.1957\,m/s, close to but slightly above the configured nominal limit due to the use of measured odometry in the logged data rather than only commanded values. The mean absolute angular velocity was 0.1317\,rad/s, and the peak angular velocity reached the configured saturation of 2.2\,rad/s.
+The velocity signals also reflect the controller constraints. The mean linear velocity was 0.1138\,m/s with a peak of 0.1599\,m/s, staying close to the configured linear limit. The mean absolute angular velocity was 0.1025\,rad/s, and the peak angular velocity reached the configured saturation of 2.2\,rad/s.
 
 \begin{table}[httb!] \small
 \centering
@@ -142,16 +142,16 @@ The velocity signals also reflect the controller constraints. The mean linear ve
         \toprule
           \textbf{metric} & \textbf{value} & \textbf{unit} \\
         \midrule
-        \rowcolor{LightBlue} Duration & 105.28 & s \\
-        Number of samples & 5265 & -- \\
-        \rowcolor{LightBlue} Mean path error & 0.0366 & m \\
-        Path error RMSE & 0.0407 & m \\
-        \rowcolor{LightBlue} Max path error & 0.0917 & m \\
-        Mean abs. heading error & 18.16 & deg \\
-        \rowcolor{LightBlue} Max abs. heading error & 72.05 & deg \\
-        Mean linear velocity & 0.1426 & m/s \\
-        \rowcolor{LightBlue} Max linear velocity & 0.1957 & m/s \\
-        Mean abs. angular velocity & 0.1317 & rad/s \\
+        \rowcolor{LightBlue} Duration & 123.78 & s \\
+        Number of samples & 6190 & -- \\
+        \rowcolor{LightBlue} Mean path error & 0.0226 & m \\
+        Path error RMSE & 0.0297 & m \\
+        \rowcolor{LightBlue} Max path error & 0.0846 & m \\
+        Mean abs. heading error & 4.08 & deg \\
+        \rowcolor{LightBlue} Max abs. heading error & 48.44 & deg \\
+        Mean linear velocity & 0.1138 & m/s \\
+        \rowcolor{LightBlue} Max linear velocity & 0.1599 & m/s \\
+        Mean abs. angular velocity & 0.1025 & rad/s \\
         \rowcolor{LightBlue} Max abs. angular velocity & 2.2000 & rad/s \\
         \bottomrule
     \end{tabularx}

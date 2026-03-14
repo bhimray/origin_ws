@@ -158,14 +158,27 @@ Run the package tests from the workspace root:
 
 ```bash
 cd /home/bim/origin_ws
-source /opt/ros/$ROS_DISTRO/setup.bash
-source install/setup.bash
-colcon test --packages-select origin_navigation
-colcon test-result --verbose
+make test ROS_DISTRO=${ROS_DISTRO:-jazzy}
 ```
 
 The included unit tests cover smoothing density and timing monotonicity in
 `src/origin_navigation/test/test_trajectory_math.py`.
+
+For faster feedback while developing controller and math logic, run the focused
+Python unit tests with:
+
+```bash
+cd /home/bim/origin_ws
+make unit-test ROS_DISTRO=${ROS_DISTRO:-jazzy}
+```
+
+## Test automation
+
+The repository now includes two automation paths:
+
+- Local automation through `make unit-test` and `make test`
+- CI automation through `.github/workflows/test-origin-navigation.yml`, which
+  runs on every push and pull request
 
 ## Results and plots
 
@@ -209,4 +222,3 @@ AI assistance was used to accelerate:
 - controller and trajectory design iteration
 - documentation drafting
 - unit test scaffolding
-
