@@ -1,8 +1,21 @@
-import rclpy
-from rclpy.node import Node
+"""
+Attach timing, heading, and desired speed information to the smoothed path.
+
+This node subscribes to `/smooth_path`, computes a time-parameterized trajectory
+using the configured cruise speed and acceleration, stores desired speed in the
+`z` position field, updates pose orientation from the path heading, and
+publishes the result on `/trajectory`.
+"""
+
 from nav_msgs.msg import Path
-from geometry_msgs.msg import PoseArray, Pose
-import math
+import rclpy
+from rclpy.duration import Duration
+from rclpy.node import Node
+
+from .trajectory_math import (
+    generate_timed_trajectory,
+    quaternion_from_yaw,
+)
 
 
 class TrajectoryGenerator(Node):
@@ -10,6 +23,9 @@ class TrajectoryGenerator(Node):
     def __init__(self):
 
         super().__init__('trajectory_generator')
+
+        self.declare_parameter('cruise_speed', 0.3)
+        self.declare_parameter('acceleration', 0.5)
 
         self.subscription = self.create_subscription(
             Path,
@@ -19,42 +35,50 @@ class TrajectoryGenerator(Node):
         )
 
         self.publisher = self.create_publisher(
-            PoseArray,
+            Path,
             '/trajectory',
             10
         )
 
-        self.velocity = 0.3
+    def callback(self, msg):
 
+        points = [
+            (pose.pose.position.x, pose.pose.position.y)
+            for pose in msg.poses
+        ]
 
-    def callback(self,msg):
+        if len(points) < 2:
+            return
 
-        traj = PoseArray()
-        traj.header.frame_id="odom"
+        cruise_speed = self.get_parameter(
+            'cruise_speed'
+        ).get_parameter_value().double_value
+        acceleration = self.get_parameter(
+            'acceleration'
+        ).get_parameter_value().double_value
+        trajectory_points = generate_timed_trajectory(
+            points,
+            cruise_speed=cruise_speed,
+            acceleration=acceleration,
+        )
 
-        prev=None
-        time=0.0
+        start_time = self.get_clock().now()
+        trajectory = Path()
+        trajectory.header.frame_id = 'odom'
+        trajectory.header.stamp = start_time.to_msg()
 
-        for pose in msg.poses:
+        for point, source_pose in zip(trajectory_points, msg.poses):
+            source_pose.header.stamp = (
+                start_time +
+                Duration(seconds=point['time_from_start'])
+            ).to_msg()
+            source_pose.pose.position.z = point['desired_speed']
+            _, _, qz, qw = quaternion_from_yaw(point['heading'])
+            source_pose.pose.orientation.z = qz
+            source_pose.pose.orientation.w = qw
+            trajectory.poses.append(source_pose)
 
-            p=Pose()
-            p.position.x=pose.pose.position.x
-            p.position.y=pose.pose.position.y
-
-            if prev:
-
-                dx=p.position.x-prev.position.x
-                dy=p.position.y-prev.position.y
-
-                dist=math.sqrt(dx*dx+dy*dy)
-
-                time+=dist/self.velocity
-
-            traj.poses.append(p)
-
-            prev=p
-
-        self.publisher.publish(traj)
+        self.publisher.publish(trajectory)
 
 
 def main():
@@ -64,3 +88,6 @@ def main():
     node = TrajectoryGenerator()
 
     rclpy.spin(node)
+
+    node.destroy_node()
+    rclpy.shutdown()

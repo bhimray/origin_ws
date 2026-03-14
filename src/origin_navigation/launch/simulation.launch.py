@@ -1,31 +1,60 @@
-from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
-from launch.substitutions import LaunchConfiguration
-from launch_ros.actions import Node
-from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.actions import IncludeLaunchDescription
-
-from ament_index_python.packages import get_package_share_directory
+"""Launch the full navigation simulation stack."""
 
 import os
+
+from ament_index_python.packages import get_package_share_directory
+from launch import LaunchDescription
+from launch.actions import AppendEnvironmentVariable
+from launch.actions import DeclareLaunchArgument
+from launch.actions import IncludeLaunchDescription
+from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.substitutions import LaunchConfiguration
+from launch_ros.actions import Node
+from origin_navigation.path_config import get_initial_waypoint
 
 
 def generate_launch_description():
 
     turtlebot3_gazebo_dir = get_package_share_directory('turtlebot3_gazebo')
+    turtlebot3_models_dir = os.path.join(turtlebot3_gazebo_dir, 'models')
 
-    # Spawn position (first circle waypoint)
+    for env_var in ('GZ_SIM_RESOURCE_PATH', 'IGN_GAZEBO_RESOURCE_PATH'):
+        existing_paths = [
+            path for path in os.environ.get(env_var, '').split(os.pathsep) if path
+        ]
+        if turtlebot3_models_dir not in existing_paths:
+            os.environ[env_var] = os.pathsep.join(
+                [*existing_paths, turtlebot3_models_dir]
+            )
+
+    initial_x, initial_y = get_initial_waypoint()
     x_pose = LaunchConfiguration('x_pose')
     y_pose = LaunchConfiguration('y_pose')
+    cruise_speed = LaunchConfiguration('cruise_speed')
 
     declare_x = DeclareLaunchArgument(
         'x_pose',
-        default_value='2.0'
+        default_value=str(initial_x)
     )
 
     declare_y = DeclareLaunchArgument(
         'y_pose',
-        default_value='0.0'
+        default_value=str(initial_y)
+    )
+
+    declare_cruise_speed = DeclareLaunchArgument(
+        'cruise_speed',
+        default_value='0.3'
+    )
+
+    gz_sim_resource_path = AppendEnvironmentVariable(
+        'GZ_SIM_RESOURCE_PATH',
+        turtlebot3_models_dir
+    )
+
+    ign_gazebo_resource_path = AppendEnvironmentVariable(
+        'IGN_GAZEBO_RESOURCE_PATH',
+        turtlebot3_models_dir
     )
 
     # Launch Gazebo world
@@ -48,7 +77,7 @@ def generate_launch_description():
         package='origin_navigation',
         executable='waypoint_publisher',
         name='waypoint_generator',
-        output='screen'
+        output='screen',
     )
 
     # Path smoothing
@@ -56,7 +85,11 @@ def generate_launch_description():
         package='origin_navigation',
         executable='path_smoother',
         name='path_smoother',
-        output='screen'
+        output='screen',
+        parameters=[{
+            'sample_spacing': 0.08,
+            'spline_smoothing': 0.02,
+        }]
     )
 
     # Trajectory generation
@@ -64,7 +97,11 @@ def generate_launch_description():
         package='origin_navigation',
         executable='trajectory_generator',
         name='trajectory_generator',
-        output='screen'
+        output='screen',
+        parameters=[{
+            'cruise_speed': cruise_speed,
+            'acceleration': 0.5,
+        }]
     )
 
     # Controller
@@ -72,7 +109,16 @@ def generate_launch_description():
         package='origin_navigation',
         executable='trajectory_controller',
         name='trajectory_controller',
-        output='screen'
+        output='screen',
+        parameters=[{
+            'max_linear_velocity': 0.16,
+            'max_angular_velocity': 2.2,
+            'front_axle_offset': 0.20,
+            'stanley_gain': 2.8,
+            'heading_gain': 1.6,
+            'softening_velocity': 0.05,
+            'speed_gain': 1.0,
+        }]
     )
 
     # Odometry path for visual comparison against reference trajectory
@@ -81,6 +127,16 @@ def generate_launch_description():
         executable='odom_path_publisher',
         name='odom_path_publisher',
         output='screen'
+    )
+
+    metrics_logger_node = Node(
+        package='origin_navigation',
+        executable='navigation_metrics_logger',
+        name='navigation_metrics_logger',
+        output='screen',
+        parameters=[{
+            'output_path': '/home/bim/origin_ws/results/navigation_metrics.csv'
+        }]
     )
 
     # RViz visualization
@@ -99,8 +155,11 @@ def generate_launch_description():
 
     return LaunchDescription([
 
+        gz_sim_resource_path,
+        ign_gazebo_resource_path,
         declare_x,
         declare_y,
+        declare_cruise_speed,
 
         gazebo,
 
@@ -109,6 +168,7 @@ def generate_launch_description():
         trajectory_node,
         controller_node,
         odom_path_node,
+        metrics_logger_node,
 
         rviz
     ])

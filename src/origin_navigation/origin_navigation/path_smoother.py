@@ -1,9 +1,21 @@
+"""
+Convert sparse waypoints into a dense smoothed path with estimated headings.
+
+This node subscribes to `/waypoints`, fits a periodic spline through the input
+points, resamples the curve at approximately uniform spacing, estimates the
+tangent heading at each sample, and publishes the result as `/smooth_path`.
+"""
+
+from geometry_msgs.msg import PoseArray, PoseStamped
+from nav_msgs.msg import Path
 import rclpy
 from rclpy.node import Node
-from nav_msgs.msg import Path
-from geometry_msgs.msg import PoseStamped, PoseArray
-import numpy as np
-from scipy.interpolate import splprep, splev
+
+from .trajectory_math import (
+    estimate_headings,
+    quaternion_from_yaw,
+    smooth_waypoints,
+)
 
 
 class PathSmoother(Node):
@@ -11,6 +23,9 @@ class PathSmoother(Node):
     def __init__(self):
 
         super().__init__('path_smoother')
+
+        self.declare_parameter('sample_spacing', 0.05)
+        self.declare_parameter('spline_smoothing', 0.02)
 
         self.subscription = self.create_subscription(
             PoseArray,
@@ -25,38 +40,45 @@ class PathSmoother(Node):
             10
         )
 
+    def callback(self, msg):
 
-    def callback(self,msg):
+        waypoints = [
+            (pose.position.x, pose.position.y)
+            for pose in msg.poses
+        ]
 
-        x=[]
-        y=[]
-
-        for pose in msg.poses:
-
-            x.append(pose.position.x)
-            y.append(pose.position.y)
-
-        if len(x)<3:
+        if len(waypoints) < 2:
             return
 
-        tck,u = splprep([x,y],s=0,per=True)
-
-        u_new = np.linspace(0,1,100,endpoint=False)
-
-        x_new,y_new = splev(u_new,tck)
+        sample_spacing = self.get_parameter(
+            'sample_spacing'
+        ).get_parameter_value().double_value
+        spline_smoothing = self.get_parameter(
+            'spline_smoothing'
+        ).get_parameter_value().double_value
+        smoothed_points = smooth_waypoints(
+            waypoints,
+            sample_spacing=sample_spacing,
+            spline_smoothing=spline_smoothing,
+        )
+        headings = estimate_headings(smoothed_points)
 
         path = Path()
-        path.header.frame_id = "odom"
+        path.header.frame_id = 'odom'
+        path.header.stamp = self.get_clock().now().to_msg()
 
-        for i in range(len(x_new)):
+        for (x_pos, y_pos), heading in zip(smoothed_points, headings):
 
             pose = PoseStamped()
-            pose.pose.position.x = float(x_new[i])
-            pose.pose.position.y = float(y_new[i])
+            pose.header = path.header
+            pose.pose.position.x = x_pos
+            pose.pose.position.y = y_pos
+            _, _, qz, qw = quaternion_from_yaw(heading)
+            pose.pose.orientation.z = qz
+            pose.pose.orientation.w = qw
 
             path.poses.append(pose)
 
-        # Append first point so the rendered path closes the loop in RViz.
         if len(path.poses) > 0:
             path.poses.append(path.poses[0])
 
