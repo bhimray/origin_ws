@@ -1,9 +1,11 @@
+"""Log path-tracking metrics from odometry against the reference path."""
+
 import csv
 import math
 import os
 
-import rclpy
 from nav_msgs.msg import Odometry, Path
+import rclpy
 from rclpy.node import Node
 
 

@@ -1,4 +1,5 @@
-"""Track the generated trajectory using odometry feedback and Stanley-style steering.
+"""
+Track the generated trajectory using odometry feedback and Stanley-style steering.
 
 This node subscribes to `/trajectory` for the reference path and `/odom` for the
 robot state. It selects the nearest path segment to the front-axle control
@@ -8,9 +9,9 @@ angular velocity commands on `/cmd_vel`.
 
 import math
 
-import rclpy
 from geometry_msgs.msg import TwistStamped
 from nav_msgs.msg import Odometry, Path
+import rclpy
 from rclpy.node import Node
 
 from .trajectory_math import normalize_angle, quaternion_to_yaw

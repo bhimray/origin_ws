@@ -1,13 +1,14 @@
-"""Convert sparse waypoints into a dense smoothed path with estimated headings.
+"""
+Convert sparse waypoints into a dense smoothed path with estimated headings.
 
 This node subscribes to `/waypoints`, fits a periodic spline through the input
 points, resamples the curve at approximately uniform spacing, estimates the
 tangent heading at each sample, and publishes the result as `/smooth_path`.
 """
 
-import rclpy
 from geometry_msgs.msg import PoseArray, PoseStamped
 from nav_msgs.msg import Path
+import rclpy
 from rclpy.node import Node
 
 from .trajectory_math import (
@@ -38,7 +39,6 @@ class PathSmoother(Node):
             '/smooth_path',
             10
         )
-
 
     def callback(self, msg):
 

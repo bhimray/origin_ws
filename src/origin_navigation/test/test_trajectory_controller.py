@@ -1,5 +1,6 @@
 """Unit tests for trajectory controller logic."""
 
+import importlib
 import math
 import pathlib
 import sys
@@ -10,7 +11,9 @@ sys.path.insert(
     str(pathlib.Path(__file__).resolve().parents[1]),
 )
 
-from origin_navigation.trajectory_controller import TrajectoryController
+TrajectoryController = importlib.import_module(
+    'origin_navigation.trajectory_controller'
+).TrajectoryController
 
 
 class _FakeParameterValue:

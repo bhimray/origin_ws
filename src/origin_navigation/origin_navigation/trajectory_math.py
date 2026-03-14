@@ -1,4 +1,5 @@
-"""Provide shared geometry, heading, smoothing, and timing utilities.
+"""
+Provide shared geometry, heading, smoothing, and timing utilities.
 
 This module contains helpers for angle and quaternion conversion, waypoint
 distance accumulation, heading estimation, spline-based path smoothing, and
@@ -8,7 +9,7 @@ trapezoidal timing calculations used to build the reference trajectory.
 import math
 
 import numpy as np
-from scipy.interpolate import splprep, splev
+from scipy.interpolate import splev, splprep
 
 
 def normalize_angle(angle):

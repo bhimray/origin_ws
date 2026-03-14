@@ -1,5 +1,6 @@
 """Unit tests for the trajectory math helpers."""
 
+import importlib
 import math
 import pathlib
 import sys
@@ -9,10 +10,10 @@ sys.path.insert(
     str(pathlib.Path(__file__).resolve().parents[1]),
 )
 
-from origin_navigation.trajectory_math import (
-    generate_timed_trajectory,
-    smooth_waypoints,
-)
+trajectory_math = importlib.import_module('origin_navigation.trajectory_math')
+
+generate_timed_trajectory = trajectory_math.generate_timed_trajectory
+smooth_waypoints = trajectory_math.smooth_waypoints
 
 
 def test_smooth_waypoints_returns_dense_closed_loop():

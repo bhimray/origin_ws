@@ -1,4 +1,5 @@
-"""Attach timing, heading, and desired speed information to the smoothed path.
+"""
+Attach timing, heading, and desired speed information to the smoothed path.
 
 This node subscribes to `/smooth_path`, computes a time-parameterized trajectory
 using the configured cruise speed and acceleration, stores desired speed in the
@@ -6,8 +7,8 @@ using the configured cruise speed and acceleration, stores desired speed in the
 publishes the result on `/trajectory`.
 """
 
-import rclpy
 from nav_msgs.msg import Path
+import rclpy
 from rclpy.duration import Duration
 from rclpy.node import Node
 
